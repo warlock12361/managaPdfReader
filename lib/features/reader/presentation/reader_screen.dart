@@ -15,37 +15,43 @@ class ReaderScreen extends StatefulWidget {
 }
 
 class _ReaderScreenState extends State<ReaderScreen> {
-  GlobalKey<PageFlipWidgetState> _controller = GlobalKey<PageFlipWidgetState>(); // Non-final, eager init
+  final _controller = GlobalKey<PageFlipWidgetState>();
   bool _immersiveMode = false;
-  PdfDocument? _document;
   
-  // New State
-  double _brightness = 1.0; // 1.0 is full brightness, 0.0 is black
-  bool _isBookmarked = false;
+  // State
+  double _brightness = 1.0;
   int _currentPage = 0;
-  int _totalPages = 10; // Default
+  int _totalPages = 10;
 
-  Timer? _saveDebounceTimer; // Debouncer
+  Timer? _saveDebounceTimer;
   Timer? _progressTimer;
-  int? _initialPage;
+  
+  // CRITICAL: Store future once to prevent multiple loads
+  late Future<Map<String, dynamic>> _loadFuture;
+  
+  // Flag to ensure we only navigate once
+  bool _hasNavigatedToInitial = false;
+  int _targetInitialPage = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadDocumentAndProgress();
+    
+    // Initialize the future ONCE in initState
+    _loadFuture = _loadDocumentAndProgress();
+    
+    // Start polling for page changes
     _progressTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      // Poll faster (100ms) for snappy UI updates, but debounce the DB write
       if (mounted && _controller.currentState != null) {
         final newPage = _controller.currentState?.pageNumber ?? 0;
         if (newPage != _currentPage) {
           setState(() {
             _currentPage = newPage;
           });
-          HapticFeedback.selectionClick(); // Feature: Haptics
+          HapticFeedback.selectionClick();
           
-          // Debounce: Cancel previous timer, start new one
           _saveDebounceTimer?.cancel();
-          _saveDebounceTimer = Timer(const Duration(seconds: 1), () { // Reduced to 1s for safety
+          _saveDebounceTimer = Timer(const Duration(seconds: 1), () {
              if (mounted) {
                PreferencesService.saveProgress(widget.filePath, newPage, _totalPages);
              }
@@ -55,43 +61,27 @@ class _ReaderScreenState extends State<ReaderScreen> {
     });
   }
 
-  Future<void> _loadDocumentAndProgress() async {
+  Future<Map<String, dynamic>> _loadDocumentAndProgress() async {
     debugPrint("Reader: Loading ${widget.filePath}...");
-    try {
-      final docLoad = widget.filePath.startsWith('/assets') 
-          ? Future.value(null) // Dummy
-          : PdfDocument.openFile(widget.filePath);
-      
-      final prefsLoad = PreferencesService.getLastPage(widget.filePath);
-
-      final results = await Future.wait([
-         docLoad,
-         prefsLoad
-      ]);
-
-      if (mounted) {
-        setState(() {
-          if (results[0] != null) {
-             _document = results[0] as PdfDocument;
-             _totalPages = _document!.pages.length;
-          } else {
-             _totalPages = 10; // Dummy
-          }
-          
-          
-          final saved = results[1] as int;
-          _initialPage = (saved >= 0 && saved < _totalPages) ? saved : 0;
-          debugPrint("Reader: Loaded initial page $_initialPage from saved $saved");
-          _currentPage = _initialPage!;
-          
-          // CRITICAL FIX: Force fresh controller to avoid stale state or Page 1 Flash
-          // Creating a new GlobalKey ensures the widget is completely rebuilt from scratch
-          _controller = GlobalKey<PageFlipWidgetState>(); 
-        });
-      }
-    } catch (e) {
-      debugPrint("Error loading: $e");
-    }
+    
+    // Load PDF document
+    final PdfDocument? document = widget.filePath.startsWith('/assets') 
+        ? null
+        : await PdfDocument.openFile(widget.filePath);
+    
+    final int totalPages = document?.pages.length ?? 10;
+    
+    // Load saved progress
+    final int savedPage = await PreferencesService.getLastPage(widget.filePath);
+    final int initialPage = (savedPage >= 0 && savedPage < totalPages) ? savedPage : 0;
+    
+    debugPrint("Reader: Loaded initial page $initialPage from saved $savedPage");
+    
+    return {
+      'document': document,
+      'totalPages': totalPages,
+      'initialPage': initialPage,
+    };
   }
 
   void _toggleImmersive() {
@@ -104,7 +94,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
   }
-
 
   void _showJumpToPageDialog() {
     final TextEditingController controller = TextEditingController();
@@ -134,8 +123,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
             onPressed: () {
               final page = int.tryParse(controller.text);
               if (page != null && page >= 1 && page <= _totalPages) {
-                Navigator.pop(context); // Close dialog FIRST
-                // Imperative call. Do not setState.
+                Navigator.pop(context);
                 _controller.currentState?.goToPage(page - 1);
               } else {
                  ScaffoldMessenger.of(context).showSnackBar(
@@ -187,7 +175,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
-  // Force Save on Pop
   Future<bool> _onWillPop() async {
     debugPrint("Reader: Closing... Forced Save at Page $_currentPage");
     await PreferencesService.saveProgress(widget.filePath, _currentPage, _totalPages);
@@ -198,131 +185,155 @@ class _ReaderScreenState extends State<ReaderScreen> {
   void dispose() {
     _progressTimer?.cancel();
     _saveDebounceTimer?.cancel();
-    // Safety net: Save one last time in case WillPop didn't catch it
     PreferencesService.saveProgress(widget.filePath, _currentPage, _totalPages);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); // Reset
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Blocking render until data is ready (Bug Fix 1)
-    if (_initialPage == null) {
-       return const Scaffold(
-         backgroundColor: Colors.black,
-         body: Center(child: CircularProgressIndicator(color: Colors.white)),
-       );
-    }
-    
-    return WillPopScope(
-      onWillPop: _onWillPop,
-      child: Scaffold(
-        backgroundColor: Colors.black, // Distraction free
-        body: Stack(
-          children: [
-            // 1. Interactive Book Layer
-            GestureDetector(
-              onTap: _toggleImmersive, // Tap center to toggle
-              child: Center(
-                child: AspectRatio(
-                  aspectRatio: 1 / 1.414, // A4ish
-                  child: Stack(
-                    children: [
-                       PageFlipWidget(
-                          key: _controller, // Fresh key used here
-                          initialIndex: _initialPage!, 
-                          backgroundColor: Colors.black,
-                          children: <Widget>[
-                            for (int i = 0; i < _totalPages; i++)
-                              _buildPage(i),
-                          ],
-                        ),
-                    ],
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _loadFuture, // Use stored future to prevent multiple calls
+      builder: (context, snapshot) {
+        // Show loading spinner until data is ready
+        if (!snapshot.hasData) {
+          return const Scaffold(
+            backgroundColor: Colors.black,
+            body: Center(child: CircularProgressIndicator(color: Colors.white)),
+          );
+        }
+
+        final data = snapshot.data!;
+        final PdfDocument? document = data['document'];
+        final int totalPages = data['totalPages'];
+        final int initialPage = data['initialPage'];
+
+        // Update state variables once (without causing rebuild)
+        if (_totalPages != totalPages) {
+          _totalPages = totalPages;
+          _currentPage = initialPage;
+          _targetInitialPage = initialPage;
+        }
+        
+        // CRITICAL FIX: page_flip package ignores initialIndex
+        // Must use goToPage() after widget is built
+        if (!_hasNavigatedToInitial && _targetInitialPage > 0) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _controller.currentState != null) {
+              debugPrint("Reader: Forcing navigation to page $_targetInitialPage");
+              _controller.currentState?.goToPage(_targetInitialPage);
+              _hasNavigatedToInitial = true;
+            }
+          });
+        }
+
+        return WillPopScope(
+          onWillPop: _onWillPop,
+          child: Scaffold(
+            backgroundColor: Colors.black,
+            body: Stack(
+              children: [
+                // PDF Viewer with Page Flip
+                GestureDetector(
+                  onTap: _toggleImmersive,
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: 1 / 1.414,
+                      child: PageFlipWidget(
+                        key: _controller,
+                        initialIndex: initialPage,
+                        backgroundColor: Colors.black,
+                        children: <Widget>[
+                          for (int i = 0; i < totalPages; i++)
+                            _buildPage(document, i),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            
-            // 2. Brightness Overlay
-            IgnorePointer(
-              child: Container(
-                 color: Colors.black.withOpacity(1.0 - _brightness),
-              ),
-            ),
+                
+                // Brightness Overlay
+                IgnorePointer(
+                  child: Container(
+                     color: Colors.black.withOpacity(1.0 - _brightness),
+                  ),
+                ),
 
-            // 3. Navigation Overlay (Top)
-            AnimatedPositioned(
-               duration: const Duration(milliseconds: 300),
-               top: _immersiveMode ? -100 : 0,
-               left: 0,
-               right: 0,
-               child: AppBar(
-                 backgroundColor: Colors.black.withOpacity(0.5),
-                 foregroundColor: Colors.white,
-                 elevation: 0,
-                 leading: IconButton(
-                   icon: const Icon(Icons.arrow_back),
-                   onPressed: () => Navigator.maybePop(context), // Use maybePop to trigger WillPopScope? Or just pop.
-                 ),
-                 title: Text(widget.filePath.split('/').last),
-                 actions: [
-                    IconButton(
-                      icon: const Icon(Icons.format_list_numbered), // Feature 1: Jump
-                      tooltip: "Jump to Page",
-                      onPressed: _showJumpToPageDialog,
-                    ),
-                   IconButton(
-                     icon: Icon(_brightness < 0.5 ? Icons.brightness_3 : Icons.wb_sunny_outlined), 
-                     onPressed: _showBrightnessControl
-                   ),
-                 ],
-               ),
-             ),
-
-             // 4. Progress Bar Overlay (Bottom)
-             AnimatedPositioned(
-               duration: const Duration(milliseconds: 300),
-               bottom: _immersiveMode ? -150 : 0,
-               left: 0,
-               right: 0,
-               child: Container(
-                 color: Colors.black.withOpacity(0.5),
-                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-                 child: SafeArea( // Priority 2: SafeArea
-                   top: false,
-                   child: Column(
-                     mainAxisSize: MainAxisSize.min,
-                     children: [
-                       Row(
-                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                         children: [
-                           Text("Page ${_currentPage + 1}", style: const TextStyle(color: Colors.white)),
-                           Text("${_totalPages} Pages", style: const TextStyle(color: Colors.white)),
-                         ],
-                       ),
-                       const SizedBox(height: 10),
-                       LinearProgressIndicator(
-                         value: (_currentPage + 1) / _totalPages,
-                         backgroundColor: Colors.grey.withOpacity(0.3),
-                         valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+                // AppBar
+                AnimatedPositioned(
+                   duration: const Duration(milliseconds: 300),
+                   top: _immersiveMode ? -100 : 0,
+                   left: 0,
+                   right: 0,
+                   child: AppBar(
+                     backgroundColor: Colors.black.withOpacity(0.5),
+                     foregroundColor: Colors.white,
+                     elevation: 0,
+                     leading: IconButton(
+                       icon: const Icon(Icons.arrow_back),
+                       onPressed: () => Navigator.maybePop(context),
+                     ),
+                     title: Text(widget.filePath.split('/').last),
+                     actions: [
+                        IconButton(
+                          icon: const Icon(Icons.format_list_numbered),
+                          tooltip: "Jump to Page",
+                          onPressed: _showJumpToPageDialog,
+                        ),
+                       IconButton(
+                         icon: Icon(_brightness < 0.5 ? Icons.brightness_3 : Icons.wb_sunny_outlined), 
+                         onPressed: _showBrightnessControl
                        ),
                      ],
                    ),
                  ),
-               ),
-             ),
-          ],
-        ),
-      ),
+
+                 // Progress Bar
+                 AnimatedPositioned(
+                   duration: const Duration(milliseconds: 300),
+                   bottom: _immersiveMode ? -150 : 0,
+                   left: 0,
+                   right: 0,
+                   child: Container(
+                     color: Colors.black.withOpacity(0.5),
+                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                     child: SafeArea(
+                       top: false,
+                       child: Column(
+                         mainAxisSize: MainAxisSize.min,
+                         children: [
+                           Row(
+                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                             children: [
+                               Text("Page ${_currentPage + 1}", style: const TextStyle(color: Colors.white)),
+                               Text("$_totalPages Pages", style: const TextStyle(color: Colors.white)),
+                             ],
+                           ),
+                           const SizedBox(height: 10),
+                           LinearProgressIndicator(
+                             value: (_currentPage + 1) / _totalPages,
+                             backgroundColor: Colors.grey.withOpacity(0.3),
+                             valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+                           ),
+                         ],
+                       ),
+                     ),
+                   ),
+                 ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildPage(int index) {
+  Widget _buildPage(PdfDocument? document, int index) {
     return Container(
       color: Colors.white,
-      child: _document != null
+      child: document != null
           ? PdfPageView(
-              document: _document!,
+              document: document,
               pageNumber: index + 1,
               alignment: Alignment.center,
             )

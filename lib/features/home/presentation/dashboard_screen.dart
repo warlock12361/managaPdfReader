@@ -3,19 +3,20 @@ import 'package:flutter/services.dart';
 import 'package:glassmorphism_ui/glassmorphism_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:cupertino_icons/cupertino_icons.dart'; // Fallback usage logic if needed
-import '../data/file_scanner_provider.dart'; // Will Mock
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../data/file_scanner_provider.dart';
 import 'widgets/file_list_view.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-class DashboardScreen extends StatefulWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
+class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
@@ -219,6 +220,27 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             ),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          // Open file picker for PDF
+          final result = await FilePicker.platform.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: ['pdf'],
+          );
+          
+          if (result != null && result.files.isNotEmpty) {
+            // Refresh the library to pick up the file
+            ref.refresh(fileListProvider);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text("Added: ${result.files.first.name}")),
+              );
+            }
+          }
+        },
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }
