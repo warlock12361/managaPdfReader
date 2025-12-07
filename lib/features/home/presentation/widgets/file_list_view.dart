@@ -155,7 +155,7 @@ class _FileListItem extends ConsumerWidget {
                                 final page = snapshot.data![0];
                                 final total = snapshot.data![1];
 
-                                if (page > 0 && total > 0) {
+                                if (page >= 0 && total > 0) {
                                   final percentage = ((page + 1) / total * 100).toStringAsFixed(0);
                                   return Padding(
                                     padding: const EdgeInsets.only(bottom: 4.0),

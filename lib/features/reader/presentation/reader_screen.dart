@@ -44,10 +44,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
           
           // Debounce: Cancel previous timer, start new one
           _saveDebounceTimer?.cancel();
-          _saveDebounceTimer = Timer(const Duration(seconds: 3), () { // 3s rule
+          _saveDebounceTimer = Timer(const Duration(seconds: 1), () { // Reduced to 1s for safety
              if (mounted) {
                PreferencesService.saveProgress(widget.filePath, newPage, _totalPages);
-               // debugPrint("Saved progress: Page $newPage"); // Uncomment for debugging only
              }
           });
         }
@@ -181,10 +180,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
+  // Force Save on Pop
+  Future<bool> _onWillPop() async {
+    await PreferencesService.saveProgress(widget.filePath, _currentPage, _totalPages);
+    return true;
+  }
+
   @override
   void dispose() {
     _progressTimer?.cancel();
-    _saveDebounceTimer?.cancel(); // Cancel pending saves
+    _saveDebounceTimer?.cancel();
+    // Safety net: Save one last time in case WillPop didn't catch it
+    PreferencesService.saveProgress(widget.filePath, _currentPage, _totalPages);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); // Reset
     super.dispose();
   }
@@ -199,102 +206,105 @@ class _ReaderScreenState extends State<ReaderScreen> {
        );
     }
     
-    return Scaffold(
-      backgroundColor: Colors.black, // Distraction free
-      body: Stack(
-        children: [
-          // 1. Interactive Book Layer
-          GestureDetector(
-            onTap: _toggleImmersive, // Tap center to toggle
-            child: Center(
-              child: AspectRatio(
-                aspectRatio: 1 / 1.414, // A4ish
-                child: Stack(
-                  children: [
-                     PageFlipWidget(
-                        key: _controller, // GlobalKey preserves state
-                        initialIndex: _initialPage!, 
-                        backgroundColor: Colors.black,
-                        children: <Widget>[
-                          for (int i = 0; i < _totalPages; i++)
-                            _buildPage(i),
-                        ],
-                      ),
-                  ],
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: Scaffold(
+        backgroundColor: Colors.black, // Distraction free
+        body: Stack(
+          children: [
+            // 1. Interactive Book Layer
+            GestureDetector(
+              onTap: _toggleImmersive, // Tap center to toggle
+              child: Center(
+                child: AspectRatio(
+                  aspectRatio: 1 / 1.414, // A4ish
+                  child: Stack(
+                    children: [
+                       PageFlipWidget(
+                          key: _controller, // GlobalKey preserves state
+                          initialIndex: _initialPage!, 
+                          backgroundColor: Colors.black,
+                          children: <Widget>[
+                            for (int i = 0; i < _totalPages; i++)
+                              _buildPage(i),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          
-          // 2. Brightness Overlay
-          IgnorePointer(
-            child: Container(
-               color: Colors.black.withOpacity(1.0 - _brightness),
+            
+            // 2. Brightness Overlay
+            IgnorePointer(
+              child: Container(
+                 color: Colors.black.withOpacity(1.0 - _brightness),
+              ),
             ),
-          ),
 
-          // 3. Navigation Overlay (Top)
-          AnimatedPositioned(
-             duration: const Duration(milliseconds: 300),
-             top: _immersiveMode ? -100 : 0,
-             left: 0,
-             right: 0,
-             child: AppBar(
-               backgroundColor: Colors.black.withOpacity(0.5),
-               foregroundColor: Colors.white,
-               elevation: 0,
-               leading: IconButton(
-                 icon: const Icon(Icons.arrow_back),
-                 onPressed: () => Navigator.pop(context),
-               ),
-               title: Text(widget.filePath.split('/').last),
-               actions: [
-                  IconButton(
-                    icon: const Icon(Icons.format_list_numbered), // Feature 1: Jump
-                    tooltip: "Jump to Page",
-                    onPressed: _showJumpToPageDialog,
-                  ),
-                 IconButton(
-                   icon: Icon(_brightness < 0.5 ? Icons.brightness_3 : Icons.wb_sunny_outlined), 
-                   onPressed: _showBrightnessControl
+            // 3. Navigation Overlay (Top)
+            AnimatedPositioned(
+               duration: const Duration(milliseconds: 300),
+               top: _immersiveMode ? -100 : 0,
+               left: 0,
+               right: 0,
+               child: AppBar(
+                 backgroundColor: Colors.black.withOpacity(0.5),
+                 foregroundColor: Colors.white,
+                 elevation: 0,
+                 leading: IconButton(
+                   icon: const Icon(Icons.arrow_back),
+                   onPressed: () => Navigator.maybePop(context), // Use maybePop to trigger WillPopScope? Or just pop.
                  ),
-               ],
-             ),
-           ),
-
-           // 4. Progress Bar Overlay (Bottom)
-           AnimatedPositioned(
-             duration: const Duration(milliseconds: 300),
-             bottom: _immersiveMode ? -150 : 0,
-             left: 0,
-             right: 0,
-             child: Container(
-               color: Colors.black.withOpacity(0.5),
-               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-               child: SafeArea( // Priority 2: SafeArea
-                 top: false,
-                 child: Column(
-                   mainAxisSize: MainAxisSize.min,
-                   children: [
-                     Row(
-                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                       children: [
-                         Text("Page ${_currentPage + 1}", style: const TextStyle(color: Colors.white)),
-                         Text("${_totalPages} Pages", style: const TextStyle(color: Colors.white)),
-                       ],
-                     ),
-                     const SizedBox(height: 10),
-                     LinearProgressIndicator(
-                       value: (_currentPage + 1) / _totalPages,
-                       backgroundColor: Colors.grey.withOpacity(0.3),
-                       valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
-                     ),
-                   ],
-                 ),
+                 title: Text(widget.filePath.split('/').last),
+                 actions: [
+                    IconButton(
+                      icon: const Icon(Icons.format_list_numbered), // Feature 1: Jump
+                      tooltip: "Jump to Page",
+                      onPressed: _showJumpToPageDialog,
+                    ),
+                   IconButton(
+                     icon: Icon(_brightness < 0.5 ? Icons.brightness_3 : Icons.wb_sunny_outlined), 
+                     onPressed: _showBrightnessControl
+                   ),
+                 ],
                ),
              ),
-           ),
-        ],
+
+             // 4. Progress Bar Overlay (Bottom)
+             AnimatedPositioned(
+               duration: const Duration(milliseconds: 300),
+               bottom: _immersiveMode ? -150 : 0,
+               left: 0,
+               right: 0,
+               child: Container(
+                 color: Colors.black.withOpacity(0.5),
+                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                 child: SafeArea( // Priority 2: SafeArea
+                   top: false,
+                   child: Column(
+                     mainAxisSize: MainAxisSize.min,
+                     children: [
+                       Row(
+                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                         children: [
+                           Text("Page ${_currentPage + 1}", style: const TextStyle(color: Colors.white)),
+                           Text("${_totalPages} Pages", style: const TextStyle(color: Colors.white)),
+                         ],
+                       ),
+                       const SizedBox(height: 10),
+                       LinearProgressIndicator(
+                         value: (_currentPage + 1) / _totalPages,
+                         backgroundColor: Colors.grey.withOpacity(0.3),
+                         valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+                       ),
+                     ],
+                   ),
+                 ),
+               ),
+             ),
+          ],
+        ),
       ),
     );
   }
