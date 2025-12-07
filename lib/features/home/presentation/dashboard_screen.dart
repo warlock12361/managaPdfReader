@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:glassmorphism_ui/glassmorphism_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/file_scanner_provider.dart';
 import 'widgets/file_list_view.dart';
@@ -223,24 +222,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          // Open file picker for PDF
-          final result = await FilePicker.platform.pickFiles(
-            type: FileType.custom,
-            allowedExtensions: ['pdf'],
-          );
-          
-          if (result != null && result.files.isNotEmpty) {
-            // Refresh the library to pick up the file
-            ref.refresh(fileListProvider);
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text("Added: ${result.files.first.name}")),
-              );
-            }
+          // Show instructions and refresh library
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Place PDFs in Downloads or Documents folder, then pull down to refresh"),
+                duration: Duration(seconds: 3),
+              ),
+            );
           }
+          ref.refresh(fileListProvider);
         },
         backgroundColor: Theme.of(context).colorScheme.primary,
-        child: const Icon(Icons.add, color: Colors.white),
+        child: const Icon(Icons.refresh, color: Colors.white),
       ),
     );
   }
