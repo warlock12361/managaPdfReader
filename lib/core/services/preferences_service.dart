@@ -21,4 +21,15 @@ class PreferencesService {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt('${_progressPrefix}total_$filePath') ?? 0;
   }
+  // Save note for a file
+  static Future<void> saveNote(String filePath, String note) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('${_progressPrefix}note_$filePath', note);
+  }
+
+  // Get note for a file
+  static Future<String?> getNote(String filePath) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('${_progressPrefix}note_$filePath');
+  }
 }

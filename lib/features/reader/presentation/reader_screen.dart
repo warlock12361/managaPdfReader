@@ -15,7 +15,7 @@ class ReaderScreen extends StatefulWidget {
 }
 
 class _ReaderScreenState extends State<ReaderScreen> {
-  final _controller = GlobalKey<PageFlipWidgetState>();
+  GlobalKey<PageFlipWidgetState> _controller = GlobalKey<PageFlipWidgetState>(); // Non-final, eager init
   bool _immersiveMode = false;
   PdfDocument? _document;
   
@@ -41,6 +41,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
           setState(() {
             _currentPage = newPage;
           });
+          HapticFeedback.selectionClick(); // Feature: Haptics
           
           // Debounce: Cancel previous timer, start new one
           _saveDebounceTimer?.cancel();
@@ -76,10 +77,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
              _totalPages = 10; // Dummy
           }
           
+          
           final saved = results[1] as int;
           _initialPage = (saved >= 0 && saved < _totalPages) ? saved : 0;
-          // debugPrint("Reader: Loaded initial page $_initialPage from saved $saved");
+          debugPrint("Reader: Loaded initial page $_initialPage from saved $saved");
           _currentPage = _initialPage!;
+          
+          // CRITICAL FIX: Force fresh controller to avoid stale state or Page 1 Flash
+          // Creating a new GlobalKey ensures the widget is completely rebuilt from scratch
+          _controller = GlobalKey<PageFlipWidgetState>(); 
         });
       }
     } catch (e) {
@@ -221,7 +227,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   child: Stack(
                     children: [
                        PageFlipWidget(
-                          key: _controller, // GlobalKey preserves state
+                          key: _controller, // Fresh key used here
                           initialIndex: _initialPage!, 
                           backgroundColor: Colors.black,
                           children: <Widget>[

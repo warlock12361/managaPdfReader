@@ -73,6 +73,43 @@ class _FileListItem extends ConsumerWidget {
         // FORCE refresh of data (and progress) when user returns
         ref.refresh(fileListProvider); 
       },
+      onLongPress: () async { // Feature: Notes
+        final existingNote = await PreferencesService.getNote(file.path);
+        final noteController = TextEditingController(text: existingNote);
+        
+        showDialog(
+          context: context, 
+          builder: (context) => AlertDialog(
+            backgroundColor: Colors.grey[900],
+            title: const Text("Notes", style: TextStyle(color: Colors.white)),
+            content: TextField(
+              controller: noteController,
+              maxLines: 5,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: "Add your thoughts...",
+                hintStyle: TextStyle(color: Colors.grey),
+                border: OutlineInputBorder(),
+                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
+              ),
+            ),
+            actions: [
+              TextButton(
+                 onPressed: () => Navigator.pop(context),
+                 child: const Text("Cancel"),
+              ),
+              TextButton(
+                 onPressed: () {
+                   PreferencesService.saveNote(file.path, noteController.text);
+                   Navigator.pop(context);
+                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Note Saved")));
+                 },
+                 child: const Text("Save", style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+      },
       borderRadius: BorderRadius.circular(20),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
