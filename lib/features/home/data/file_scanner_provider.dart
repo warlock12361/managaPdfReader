@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class PdfFile {
@@ -39,40 +41,64 @@ class PdfFile {
 class FileListNotifier extends AsyncNotifier<List<PdfFile>> {
   @override
   Future<List<PdfFile>> build() async {
-    // Simulate delay
-    await Future.delayed(const Duration(milliseconds: 800));
+    // 1. Check Permissions
+    if (await Permission.storage.isDenied && await Permission.manageExternalStorage.isDenied) {
+       // If absolutely no permission, return empty or dummy (UI handles prompt)
+       // But let's try to proceed if we have partial access or if user just granted it.
+       // Ideally we wait for the UI to prompt.
+       // return []; 
+    }
 
-    return [
-      PdfFile(
-        path: '/assets/dummy/design_patterns.pdf',
-        title: 'Design Patterns',
-        author: 'Gang of Four',
-        size: '2.4 MB',
-        date: DateTime.now().subtract(const Duration(days: 1)),
-        isFavorite: true,
-      ),
-      PdfFile(
-        path: '/assets/dummy/flutter_architecture.pdf',
-        title: 'Flutter Architecture',
-        author: 'Google',
-        size: '5.1 MB',
-        date: DateTime.now().subtract(const Duration(days: 5)),
-      ),
-      PdfFile(
-        path: '/assets/dummy/clean_code.pdf',
-        title: 'Clean Code',
-        author: 'Robert C. Martin',
-        size: '1.2 MB',
-        date: DateTime.now().subtract(const Duration(hours: 4)),
-      ),
-      PdfFile(
-        path: '/assets/dummy/pragmatic_programmer.pdf',
-        title: 'The Pragmatic Programmer',
-        author: 'Andrew Hunt',
-        size: '3.8 MB',
-        date: DateTime.now().subtract(const Duration(days: 12)),
-      ),
-    ];
+    // 2. Scan Device
+    final List<PdfFile> files = [];
+    try {
+      // Common paths to scan
+      final List<String> pathsToScan = [
+        '/storage/emulated/0/Download',
+        '/storage/emulated/0/Documents',
+        '/storage/emulated/0/Books',
+        '/storage/emulated/0', // Root scan enabled per user request
+      ];
+
+      // Use a Set to avoid duplicates if paths overlap
+      final Set<String> processedPaths = {};
+
+      for (final path in pathsToScan) {
+        final dir = Directory(path);
+        if (await dir.exists()) {
+          // Recursive scan
+          try {
+             await for (final entity in dir.list(recursive: true, followLinks: false)) {
+               if (entity is File && entity.path.toLowerCase().endsWith('.pdf')) {
+                 if (processedPaths.contains(entity.path)) continue;
+                 processedPaths.add(entity.path);
+
+                 final stat = await entity.stat();
+                 final sizeMb = (stat.size / (1024 * 1024)).toStringAsFixed(1);
+                 
+                 files.add(PdfFile(
+                   path: entity.path,
+                   title: entity.path.split('/').last.replaceAll('.pdf', ''),
+                   author: 'Local File', // Metadata extraction is complex, use placeholder
+                   size: '$sizeMb MB',
+                   date: stat.modified,
+                   isFavorite: false, // Could load from local DB if persisted
+                 ));
+               }
+             }
+          } catch (e) {
+            // Ignore access errors in specific subfolders
+          }
+        }
+      }
+    } catch (e) {
+      // Error scanning
+    }
+    
+    // Sort by date new to old
+    files.sort((a, b) => b.date.compareTo(a.date));
+
+    return files;
   }
 
   void toggleFavorite(String path) {

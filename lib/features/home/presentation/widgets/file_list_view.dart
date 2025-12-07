@@ -28,16 +28,22 @@ class FileListView extends ConsumerWidget {
           files = files.where((f) => f.title.toLowerCase().contains(searchQuery.toLowerCase())).toList();
         }
 
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: files.length,
-          itemBuilder: (context, index) {
-            final file = files[index];
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 16.0),
-              child: _FileListItem(file: file),
-            );
+        return RefreshIndicator(
+          onRefresh: () async {
+             // Reload the provider (re-scan files)
+             return ref.refresh(fileListProvider.future);
           },
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: files.length,
+            itemBuilder: (context, index) {
+              final file = files[index];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16.0),
+                child: _FileListItem(file: file),
+              );
+            },
+          ),
         );
       },
       loading: () => const Center(child: CircularProgressIndicator()),

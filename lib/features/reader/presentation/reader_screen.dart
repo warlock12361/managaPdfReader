@@ -56,6 +56,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Future<void> _loadDocumentAndProgress() async {
+    debugPrint("Reader: Loading ${widget.filePath}...");
     try {
       final docLoad = widget.filePath.startsWith('/assets') 
           ? Future.value(null) // Dummy
@@ -188,6 +189,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   // Force Save on Pop
   Future<bool> _onWillPop() async {
+    debugPrint("Reader: Closing... Forced Save at Page $_currentPage");
     await PreferencesService.saveProgress(widget.filePath, _currentPage, _totalPages);
     return true;
   }
